@@ -24,6 +24,26 @@ STATE_FILE = os.getenv("NET_STATE_FILE", "net_state.json")
 TOKEN = os.getenv("MONITOR_TOKEN") or exit("Error: MONITOR_TOKEN not set in .env")
 CSV_FILE = os.getenv("CSV_FILE", "metrics.csv")
 
+
+def get_load_average():
+    if hasattr(os, "getloadavg"):
+        return os.getloadavg()
+    return 0.0, 0.0, 0.0
+
+
+def get_disk_usage():
+    usage = {}
+    for partition in psutil.disk_partitions(all=False):
+        try:
+            usage[partition.mountpoint] = round(
+                psutil.disk_usage(partition.mountpoint).percent, 1
+            )
+        except (OSError, PermissionError):
+            continue
+    if not usage:
+        raise ValueError("No accessible disk found")
+    return dict(sorted(usage.items()))
+
 # ─── CSV Header Setup ─────────────────────────────────────────────────────────
 
 if not os.path.exists(CSV_FILE):
@@ -131,8 +151,9 @@ def get_metrics():
     recv_kbps = (net_after.bytes_recv - net_before.bytes_recv) / 1024.0
 
     mem = psutil.virtual_memory().percent
-    disk = psutil.disk_usage("/").percent
-    load1, load5, load15 = os.getloadavg()
+    disk_usage = get_disk_usage()
+    disk = max(disk_usage.values())
+    load1, load5, load15 = get_load_average()
 
     # 2) Monthly deltas & accumulators
     sent_delta, recv_delta, accum_sent, accum_recv = get_monthly_net()
@@ -145,6 +166,7 @@ def get_metrics():
         "cpu_pct": round(cpu, 1),
         "memory_pct": round(mem, 1),
         "disk_pct": round(disk, 1),
+        "disk_usage": disk_usage,
         "load_avg": {
             "1m": round(load1, 2),
             "5m": round(load5, 2),
@@ -185,6 +207,7 @@ def log_csv_row(metrics, status):
 # ─── HTTP Server Handler ──────────────────────────────────────────────────────
 
 servers = []
+shutdown_event = threading.Event()
 
 
 class MonitorHandler(BaseHTTPRequestHandler):
@@ -239,9 +262,9 @@ def run_server(host: str):
 
 def shutdown(sig, frame):
     print("[monitor] Shutting down...")
+    shutdown_event.set()
     for srv in servers:
-        srv.shutdown()
-    exit(0)
+        threading.Thread(target=srv.shutdown, daemon=True).start()
 
 
 if __name__ == "__main__":
@@ -254,5 +277,5 @@ if __name__ == "__main__":
         t = threading.Thread(target=run_server, args=(ip,), daemon=True)
         t.start()
 
-    # Block until signals
-    signal.pause()
+    # signal.pause() is unavailable on Windows.
+    shutdown_event.wait()

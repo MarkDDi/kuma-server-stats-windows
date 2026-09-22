@@ -23,14 +23,15 @@ A lightweight Python-based HTTP health-check service that reports CPU, memory, d
 
 ## ⚙️ Prerequisites
 
-- **Linux server** with `systemd`
-- **Python 3.6+** and `python3-venv`
-- `pip + venv` (for dependency installation)
-- `sudo` or **root** privileges
+- Linux server with `systemd`, or Windows 10/11 with Python 3.8+
+- `pip` and `venv`
+- On Windows, the network interface name must match `psutil.net_io_counters(pernic=True)` (for example `Ethernet`)
 
 ---
 
 ## 🛠️ Installation
+
+### Linux
 
 1. **Clone or copy** all files to a local directory on your server.
 2. **Make the installer executable**:
@@ -59,11 +60,29 @@ A lightweight Python-based HTTP health-check service that reports CPU, memory, d
    journalctl -u simple-monitor.service -f
    ```
 
+### Windows
+
+Open PowerShell in the project directory and run:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install psutil python-dotenv
+.\.venv\Scripts\python.exe .\monitor.py
+```
+
+Find the network interface name with:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import psutil; print(list(psutil.net_io_counters(pernic=True)))"
+```
+
+Set `NET_IFACE` to one of the printed names. Use `BIND_IPS=127.0.0.1` for local access, or `BIND_IPS=0.0.0.0` for access from another machine. To start it automatically, create a Windows Task Scheduler task that runs `.venv\Scripts\python.exe monitor.py` with the project directory as its working directory. Allow TCP port `5000` through Windows Firewall if remote access is needed.
+
 ---
 
 ## 🔧 Configuration
 
-Edit `/opt/simple-monitor/.env` to set your preferred values:
+Edit the `.env` file in the project directory to set your preferred values. On Linux the installed copy is `/opt/simple-monitor/.env`.
 
 ```ini
 # /opt/simple-monitor/.env
@@ -72,10 +91,10 @@ Edit `/opt/simple-monitor/.env` to set your preferred values:
 MONITOR_TOKEN=your-strong-token
 
 # Listening port
-MONITOR_PORT=5000
+PORT=5000
 
 # Comma-separated IPs to bind (e.g. localhost and Docker bridge)
-MONITOR_BIND_IPS=127.0.0.1,172.17.0.1
+BIND_IPS=127.0.0.1
 
 # Thresholds (percentages)
 CPU_THRESHOLD=85
@@ -83,7 +102,7 @@ MEM_THRESHOLD=90
 DISK_THRESHOLD=90
 
 # Network interface to monitor
-NET_IFACE=eth0
+NET_IFACE=Ethernet
 
 # State file for monthly accumulation
 NET_STATE_FILE=net_state.json
@@ -97,6 +116,10 @@ After changing `.env`, reload the service:
 ```bash
 sudo systemctl restart simple-monitor.service
 ```
+
+On Windows, stop and restart the `monitor.py` process after changing `.env`.
+
+Windows does not provide Unix load averages, so `load1`, `load5`, and `load15` are reported as `0` on Windows.
 
 ---
 
@@ -117,6 +140,7 @@ All endpoints require authentication via either:
     "cpu_pct": 27.3,
     "mem_pct": 41.2,
     "disk_pct": 67.9,
+    "disk_usage": {"C:\\": 67.9, "D:\\": 42.1},
     "load_avg": { "1m": 0.12, "5m": 0.08, "15m": 0.05 },
     "net_kbps": { "sent": 1.5, "recv": 2.2 },
     "net_monthly_mb": { "sent": 1234.56, "recv": 7890.12 }
@@ -131,6 +155,7 @@ All endpoints require authentication via either:
     "cpu_pct": 92.1,
     "mem_pct": 88.0,
     "disk_pct": 67.9,
+    "disk_usage": {"C:\\": 67.9, "D:\\": 42.1},
     "load_avg": { "1m": 2.5, "5m": 1.8, "15m": 1.2 },
     "net_kbps": { "sent": 0.0, "recv": 0.0 },
     "net_monthly_mb": { "sent": 2345.67, "recv": 3456.78 }
